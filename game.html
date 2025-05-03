@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Game Receiver</title>
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <!-- <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469241/pose.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script> -->
+
+    <!-- MediaPipe Pose and dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+</head>
+<body>
+  <h2>Game Receiver</h2>
+  <p>Your Peer ID: <span id="peerIdDisplay"></span></p>
+  <canvas id="output" width="640" height="480"></canvas>
+
+  <script>
+    const outputCanvas = document.getElementById('output');
+    const ctx = outputCanvas.getContext('2d');
+
+    const peer = new Peer();
+    // const pose = new Pose.Pose({
+    const pose = new Pose({ 
+      locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+    });
+
+    // pose.setOptions({
+    //   modelComplexity: 1,
+    //   smoothLandmarks: true,
+    //   enableSegmentation: false,
+    //   minDetectionConfidence: 0.5,
+    //   minTrackingConfidence: 0.5
+    // })
+
+    pose.setOptions({
+        modelComplexity: 0,
+        smoothLandmarks: true,
+        enableSegmentation: false,
+        minDetectionConfidence: 0.3,
+        minTrackingConfidence: 0.3
+        });
+
+    // pose.onResults(results => {
+    //   ctx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
+    //   if (results.image) ctx.drawImage(results.image, 0, 0, outputCanvas.width, outputCanvas.height);
+
+    //   if (results.poseLandmarks) {
+    //     for (const lm of results.poseLandmarks) {
+    //       ctx.beginPath();
+    //       ctx.arc(lm.x * outputCanvas.width, lm.y * outputCanvas.height, 5, 0, 2 * Math.PI);
+    //       ctx.fillStyle = 'red';
+    //       ctx.fill();
+    //     }
+    //   }
+    // });
+
+    pose.onResults(results => {
+        ctx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
+
+        if (results.image) {
+            ctx.drawImage(results.image, 0, 0, outputCanvas.width, outputCanvas.height);
+        }
+
+        if (results.poseLandmarks) {
+            console.log('Detected pose landmarks:', results.poseLandmarks.length);
+
+            results.poseLandmarks.forEach((lm, i) => {
+            const x = lm.x * outputCanvas.width;
+            const y = lm.y * outputCanvas.height;
+
+            // Draw red dot
+            ctx.beginPath();
+            ctx.arc(x, y, 5, 0, 2 * Math.PI);
+            ctx.fillStyle = 'red';
+            ctx.fill();
+
+            // Draw landmark index
+            ctx.fillStyle = 'white';
+            ctx.font = '10px Arial';
+            ctx.fillText(i, x + 6, y - 6);
+            });
+        } else {
+            console.warn('⚠️ No pose landmarks detected.');
+        }
+        });
+
+
+    peer.on('open', id => {
+      document.getElementById('peerIdDisplay').textContent = id;
+    });
+
+    peer.on('connection', conn => {
+      conn.on('data', async imageData => {
+        const img = new Image();
+        img.onload = async () => {
+          outputCanvas.width = img.width;
+          outputCanvas.height = img.height;
+          ctx.drawImage(img, 0, 0);
+          await pose.send({ image: img });
+        };
+        img.src = imageData;
+      });
+    });
+  </script>
+</body>
+</html>

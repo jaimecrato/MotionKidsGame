@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Camera Sender</title>
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+</head>
+<body>
+  <h2>Camera App</h2>
+  <video id="video" autoplay playsinline></video>
+  <canvas id="canvas" hidden></canvas>
+  <p>Enter Receiver Peer ID: <input id="peerIdInput" /> <button onclick="connect()">Connect</button></p>
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    let conn = null;
+
+    const peer = new Peer(); // creates a new PeerJS ID
+
+    peer.on('open', id => {
+      console.log('Camera Peer ID:', id);
+      alert(`Camera Peer ID: ${id}`);
+    });
+
+    async function startCamera() {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      video.srcObject = stream;
+    }
+
+    function connect() {
+      const targetId = document.getElementById('peerIdInput').value;
+      conn = peer.connect(targetId);
+      conn.on('open', () => {
+        console.log('Connected to receiver');
+        setInterval(sendFrame, 200);
+      });
+    }
+
+    function sendFrame() {
+      if (!conn || !video.videoWidth) return;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0);
+      const imgData = canvas.toDataURL('image/jpeg', 0.6);
+      conn.send(imgData);
+    }
+
+    startCamera();
+  </script>
+</body>
+</html>
