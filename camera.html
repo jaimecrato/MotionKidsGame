@@ -1,3 +1,4 @@
+<!-- camera.html -->
 <!DOCTYPE html>
 <html>
 <head>
@@ -6,20 +7,21 @@
 </head>
 <body>
   <h2>Camera App</h2>
-  <video id="video" autoplay playsinline></video>
-  <canvas id="canvas" hidden></canvas>
-  <p>Enter Receiver Peer ID: <input id="peerIdInput" /> <button onclick="connect()">Connect</button></p>
+  <video id="video" autoplay playsinline muted style="width: 100%; max-width: 400px;"></video>
+  <canvas id="canvas" style="display:none"></canvas>
+  <br>
+  <input id="peerIdInput" placeholder="Enter Game Peer ID" />
+  <button onclick="connect()">Connect</button>
+
   <script>
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     let conn = null;
 
-    const peer = new Peer(); // creates a new PeerJS ID
-
+    const peer = new Peer();
     peer.on('open', id => {
-      console.log('Camera Peer ID:', id);
-      alert(`Camera Peer ID: ${id}`);
+      alert('Camera Peer ID: ' + id);
     });
 
     async function startCamera() {
@@ -31,13 +33,13 @@
       const targetId = document.getElementById('peerIdInput').value;
       conn = peer.connect(targetId);
       conn.on('open', () => {
-        console.log('Connected to receiver');
+        console.log('Connected to game');
         setInterval(sendFrame, 200);
       });
     }
 
     function sendFrame() {
-      if (!conn || !video.videoWidth) return;
+      if (!video.videoWidth) return;
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       ctx.drawImage(video, 0, 0);

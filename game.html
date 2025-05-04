@@ -1,7 +1,8 @@
+<!-- game.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <title>MoveNet Fullscreen Pose Game</title>
   <style>
     html, body {
@@ -53,7 +54,6 @@
     let balloon = { x: 300, y: 200, radius: 40 };
     let score = 0;
 
-    // Resize canvas to full browser window
     function resizeCanvas() {
       const dpr = window.devicePixelRatio || 1;
       canvas.width = window.innerWidth * dpr;
@@ -67,7 +67,6 @@
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
 
-    // Load MoveNet Multipose
     async function loadModel() {
       detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
         modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
@@ -79,7 +78,6 @@
 
     loadModel();
 
-    // Initialize PeerJS
     const peer = new Peer({ host: '0.peerjs.com', port: 443, secure: true });
 
     peer.on('open', id => {
@@ -96,24 +94,26 @@
       });
     });
 
-    // Main detection and rendering
     async function detectAndDraw(image) {
       if (!detector) return;
 
-      // Clear and draw camera image
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(
-        image,
-        0,
-        0,
-        canvas.width / (window.devicePixelRatio || 1),
-        canvas.height / (window.devicePixelRatio || 1)
-      );
 
-      // Detect poses
+      const imgWidth = image.naturalWidth || image.width;
+      const imgHeight = image.naturalHeight || image.height;
+
+      if (imgWidth > 0 && imgHeight > 0) {
+        ctx.drawImage(
+          image,
+          0,
+          0,
+          canvas.width / (window.devicePixelRatio || 1),
+          canvas.height / (window.devicePixelRatio || 1)
+        );
+      }
+
       const poses = await detector.estimatePoses(image);
 
-      // Draw balloon
       ctx.beginPath();
       ctx.arc(balloon.x, balloon.y, balloon.radius, 0, 2 * Math.PI);
       ctx.fillStyle = 'skyblue';
@@ -121,12 +121,10 @@
       ctx.strokeStyle = 'blue';
       ctx.stroke();
 
-      // Loop through all people
       for (const person of poses) {
         const keypoints = person.keypoints;
         drawSkeleton(keypoints);
 
-        // Detect right wrist collision (index 10)
         const wrist = keypoints[10];
         if (wrist && wrist.score > 0.3) {
           const x = wrist.x * (canvas.width / image.width);
@@ -134,6 +132,7 @@
           const dx = x - balloon.x;
           const dy = y - balloon.y;
           const distance = Math.sqrt(dx * dx + dy * dy);
+
           if (distance < balloon.radius + 10) {
             score++;
             balloon.x = Math.random() * (canvas.width / (window.devicePixelRatio || 1) - 60) + 30;
@@ -142,7 +141,6 @@
         }
       }
 
-      // Draw score
       ctx.fillStyle = 'white';
       ctx.font = '20px Arial';
       ctx.fillText("Score: " + score, 20, 30);
