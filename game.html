@@ -38,6 +38,7 @@
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.12.0/dist/tf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+  
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection/dist/movenet.js"></script>
 </head>
 <body>
@@ -55,170 +56,189 @@
   </div>
   <canvas id="output"></canvas>
 
-  <script>
-    const canvas = document.getElementById('output');
-    const ctx = canvas.getContext('2d');
-    const peerIdDisplay = document.getElementById('peerIdDisplay');
-    const viewModeSelect = document.getElementById('viewMode');
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/body-pix@2.0.5"></script>
+<script>
+  const canvas = document.getElementById('output');
+  const ctx = canvas.getContext('2d');
+  const peerIdDisplay = document.getElementById('peerIdDisplay');
+  const viewModeSelect = document.getElementById('viewMode');
 
-    let detector;
-    let videoFrame = null;
-    let balloon = { x: 300, y: 200, radius: 40 };
-    let score = 0;
+  let detector;
+  let segmentationModel; // will be bodyPix
+  let videoFrame = null;
+  let balloon = { x: 300, y: 200, radius: 40 };
+  let score = 0;
 
-    let backgroundReady = false;
-    const backgroundImg = new Image();
-    backgroundImg.onload = () => { backgroundReady = true; };
-    backgroundImg.src = 'img/background_forest.png';
+  let backgroundReady = false;
+  const backgroundImg = new Image();
+  backgroundImg.onload = () => { backgroundReady = true; };
+  backgroundImg.src = 'img/background_forest.png';
 
-    const overlayImg = new Image();
-    overlayImg.src = 'img/overlay_playful_scene.png';
+  const overlayImg = new Image();
+  overlayImg.src = 'img/overlay_playful_scene.png';
 
-    function resizeCanvas() {
-      const dpr = window.devicePixelRatio || 1;
-      canvas.width = window.innerWidth * dpr;
-      canvas.height = window.innerHeight * dpr;
-      canvas.style.width = window.innerWidth + 'px';
-      canvas.style.height = window.innerHeight + 'px';
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.scale(dpr, dpr);
-    }
+  function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(dpr, dpr);
+  }
 
-    window.addEventListener('resize', resizeCanvas);
-    resizeCanvas();
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
 
-    async function loadModel() {
-      detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
-        modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
-        enableTracking: true,
-        trackerType: 'boundingBox'
-      });
-      console.log("✅ MoveNet Multipose model loaded");
-    }
-
-    loadModel();
-
-    const peer = new Peer({ host: '0.peerjs.com', port: 443, secure: true });
-
-    peer.on('open', id => {
-      peerIdDisplay.textContent = id;
+  async function loadModel() {
+    detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
+      modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
+      enableTracking: true,
+      trackerType: 'boundingBox'
     });
+    segmentationModel = await bodyPix.load();
+    console.log("✅ Models loaded");
+  }
 
-    peer.on('connection', conn => {
-      conn.on('data', async imageData => {
-        videoFrame = new Image();
-        videoFrame.onload = async () => {
-          await detectAndDraw(videoFrame);
-        };
-        videoFrame.src = imageData;
-      });
+  loadModel();
+
+  const peer = new Peer({ host: '0.peerjs.com', port: 443, secure: true });
+
+  peer.on('open', id => {
+    peerIdDisplay.textContent = id;
+  });
+
+  peer.on('connection', conn => {
+    conn.on('data', async imageData => {
+      videoFrame = new Image();
+      videoFrame.onload = async () => {
+        await detectAndDraw(videoFrame);
+      };
+      videoFrame.src = imageData;
     });
+  });
 
-    async function detectAndDraw(image) {
-      if (!detector) return;
-      const imgWidth = image.naturalWidth || image.width;
-      const imgHeight = image.naturalHeight || image.height;
-      if (!imgWidth || !imgHeight) return;
+  async function detectAndDraw(image) {
+    if (!detector || !segmentationModel) return;
+    const imgWidth = image.naturalWidth || image.width;
+    const imgHeight = image.naturalHeight || image.height;
+    if (!imgWidth || !imgHeight) return;
 
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      const mode = viewModeSelect.value;
-      const drawW = canvas.width / (window.devicePixelRatio || 1);
-      const drawH = canvas.height / (window.devicePixelRatio || 1);
+    const mode = viewModeSelect.value;
+    const drawW = canvas.width / (window.devicePixelRatio || 1);
+    const drawH = canvas.height / (window.devicePixelRatio || 1);
 
-      if (mode === 'camera' || mode === 'overlay') {
-        ctx.save();
-        ctx.translate(drawW, 0);
-        ctx.scale(-1, 1);
-        ctx.drawImage(image, 0, 0, drawW, drawH);
-        ctx.restore();
-      } else if (mode === 'virtual') {
-        if (backgroundReady) {
-          ctx.drawImage(backgroundImg, 0, 0, drawW, drawH);
-        } else {
-          ctx.fillStyle = 'black';
-          ctx.fillRect(0, 0, drawW, drawH);
-        }
+    if (mode === 'camera' || mode === 'overlay') {
+      ctx.save();
+      ctx.translate(drawW, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(image, 0, 0, drawW, drawH);
+      ctx.restore();
+    } else if (mode === 'cutout') {
+      const segmentation = await segmentationModel.segmentPerson(image);
+      const mask = bodyPix.toMask(segmentation);
+      const offscreen = document.createElement('canvas');
+      offscreen.width = canvas.width;
+      offscreen.height = canvas.height;
+      const offCtx = offscreen.getContext('2d');
+      offCtx.putImageData(mask, 0, 0);
+      ctx.save();
+      ctx.translate(drawW, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(backgroundImg, 0, 0, drawW, drawH);
+      ctx.globalCompositeOperation = 'source-in';
+      ctx.drawImage(image, 0, 0, drawW, drawH);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.restore();
+    } else if (mode === 'virtual') {
+      if (backgroundReady) {
+        ctx.drawImage(backgroundImg, 0, 0, drawW, drawH);
+      } else {
+        ctx.fillStyle = 'black';
+        ctx.fillRect(0, 0, drawW, drawH);
       }
-
-      if (mode === 'overlay') {
-        ctx.drawImage(overlayImg, 0, 0, drawW, drawH);
-      }
-
-      const poses = await detector.estimatePoses(image);
-
-      if (mode !== 'cutout') {
-        ctx.beginPath();
-        ctx.arc(balloon.x, balloon.y, balloon.radius, 0, 2 * Math.PI);
-        ctx.fillStyle = 'skyblue';
-        ctx.fill();
-        ctx.strokeStyle = 'blue';
-        ctx.stroke();
-      }
-
-      for (const person of poses) {
-        const keypoints = person.keypoints;
-        drawSkeleton(keypoints);
-
-        const wrist = keypoints[10];
-        if (wrist && wrist.score > 0.3 && mode !== 'cutout') {
-          const x = wrist.x * (canvas.width / image.width);
-          const y = wrist.y * (canvas.height / image.height);
-          const dx = x - balloon.x;
-          const dy = y - balloon.y;
-          const distance = Math.sqrt(dx * dx + dy * dy);
-
-          if (distance < balloon.radius + 10) {
-            score++;
-            balloon.x = Math.random() * (drawW - 60) + 30;
-            balloon.y = Math.random() * (drawH - 60) + 30;
-          }
-        }
-      }
-
-      ctx.fillStyle = 'white';
-      ctx.font = '20px Arial';
-      ctx.fillText("Score: " + score, 20, 30);
     }
 
-    function drawSkeleton(keypoints) {
-  if (viewModeSelect.value === 'cutout') return;
+    if (mode === 'overlay') {
+      ctx.drawImage(overlayImg, 0, 0, drawW, drawH);
+    }
 
-  const isMirrored = ['camera', 'overlay', 'virtual', 'skeleton'].includes(viewModeSelect.value);
-  const drawW = canvas.width / (window.devicePixelRatio || 1);
-  const flipX = x => isMirrored ? drawW - (x * (canvas.width / videoFrame.width)) : x * (canvas.width / videoFrame.width);
-  const scaleY = y => y * (canvas.height / videoFrame.height);
+    const poses = await detector.estimatePoses(image);
 
-  const pairs = poseDetection.util.getAdjacentPairs(poseDetection.SupportedModels.MoveNet);
-  ctx.strokeStyle = 'white';
-  ctx.lineWidth = 2;
-
-  pairs.forEach(([a, b]) => {
-    const kp1 = keypoints[a];
-    const kp2 = keypoints[b];
-    if (kp1.score > 0.3 && kp2.score > 0.3) {
-      const x1 = flipX(kp1.x);
-      const y1 = scaleY(kp1.y);
-      const x2 = flipX(kp2.x);
-      const y2 = scaleY(kp2.y);
+    if (mode !== 'cutout') {
       ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
+      ctx.arc(balloon.x, balloon.y, balloon.radius, 0, 2 * Math.PI);
+      ctx.fillStyle = 'skyblue';
+      ctx.fill();
+      ctx.strokeStyle = 'blue';
       ctx.stroke();
     }
-  });
+
+    for (const person of poses) {
+      const keypoints = person.keypoints;
+      drawSkeleton(keypoints);
+
+      const wrist = keypoints[10];
+      if (wrist && wrist.score > 0.3 && mode !== 'cutout') {
+        const x = wrist.x * (canvas.width / image.width);
+        const y = wrist.y * (canvas.height / image.height);
+        const dx = x - balloon.x;
+        const dy = y - balloon.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance < balloon.radius + 10) {
+          score++;
+          balloon.x = Math.random() * (drawW - 60) + 30;
+          balloon.y = Math.random() * (drawH - 60) + 30;
+        }
+      }
+    }
+
+    ctx.fillStyle = 'white';
+    ctx.font = '20px Arial';
+    ctx.fillText("Score: " + score, 20, 30);
+  }
+
+  function drawSkeleton(keypoints) {
+    if (viewModeSelect.value === 'cutout') return;
+
+    const isMirrored = ['camera', 'overlay', 'virtual', 'skeleton'].includes(viewModeSelect.value);
+    const drawW = canvas.width / (window.devicePixelRatio || 1);
+    const flipX = x => isMirrored ? drawW - (x * (canvas.width / videoFrame.width)) : x * (canvas.width / videoFrame.width);
+    const scaleY = y => y * (canvas.height / videoFrame.height);
+
+    const pairs = poseDetection.util.getAdjacentPairs(poseDetection.SupportedModels.MoveNet);
+    ctx.strokeStyle = 'white';
+    ctx.lineWidth = 2;
+
+    pairs.forEach(([a, b]) => {
+      const kp1 = keypoints[a];
+      const kp2 = keypoints[b];
+      if (kp1.score > 0.3 && kp2.score > 0.3) {
+        const x1 = flipX(kp1.x);
+        const y1 = scaleY(kp1.y);
+        const x2 = flipX(kp2.x);
+        const y2 = scaleY(kp2.y);
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+      }
+    });
 
     keypoints.forEach(kp => {
-    if (kp.score > 0.3) {
-      const x = flipX(kp.x);
-      const y = scaleY(kp.y);
-      ctx.beginPath();
-      ctx.arc(x, y, 4, 0, 2 * Math.PI);
-      ctx.fillStyle = 'red';
-      ctx.fill();
-    }
-  });
-}
+      if (kp.score > 0.3) {
+        const x = flipX(kp.x);
+        const y = scaleY(kp.y);
+        ctx.beginPath();
+        ctx.arc(x, y, 4, 0, 2 * Math.PI);
+        ctx.fillStyle = 'red';
+        ctx.fill();
+      }
+    });
+  }
 </script>
 </body>
 </html>
