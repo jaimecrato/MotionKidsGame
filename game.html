@@ -1,4 +1,4 @@
-<!-- game.html -->
+<!-- game.html with mirrored camera and skeleton -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -103,6 +103,9 @@
       const imgHeight = image.naturalHeight || image.height;
 
       if (imgWidth > 0 && imgHeight > 0) {
+        ctx.save();
+        ctx.translate(canvas.width / (window.devicePixelRatio || 1), 0);
+        ctx.scale(-1, 1);
         ctx.drawImage(
           image,
           0,
@@ -110,10 +113,12 @@
           canvas.width / (window.devicePixelRatio || 1),
           canvas.height / (window.devicePixelRatio || 1)
         );
+        ctx.restore();
       }
 
       const poses = await detector.estimatePoses(image);
 
+      // Draw balloon (not mirrored)
       ctx.beginPath();
       ctx.arc(balloon.x, balloon.y, balloon.radius, 0, 2 * Math.PI);
       ctx.fillStyle = 'skyblue';
@@ -123,13 +128,13 @@
 
       for (const person of poses) {
         const keypoints = person.keypoints;
-        drawSkeleton(keypoints);
+        drawSkeletonMirrored(keypoints);
 
         const wrist = keypoints[10];
         if (wrist && wrist.score > 0.3) {
-          const x = wrist.x * (canvas.width / image.width);
+          const mirroredX = canvas.width / (window.devicePixelRatio || 1) - (wrist.x * (canvas.width / image.width));
           const y = wrist.y * (canvas.height / image.height);
-          const dx = x - balloon.x;
+          const dx = mirroredX - balloon.x;
           const dy = y - balloon.y;
           const distance = Math.sqrt(dx * dx + dy * dy);
 
@@ -146,7 +151,7 @@
       ctx.fillText("Score: " + score, 20, 30);
     }
 
-    function drawSkeleton(keypoints) {
+    function drawSkeletonMirrored(keypoints) {
       const pairs = poseDetection.util.getAdjacentPairs(poseDetection.SupportedModels.MoveNet);
       ctx.strokeStyle = 'white';
       ctx.lineWidth = 2;
@@ -155,9 +160,9 @@
         const kp1 = keypoints[a];
         const kp2 = keypoints[b];
         if (kp1.score > 0.3 && kp2.score > 0.3) {
-          const x1 = kp1.x * (canvas.width / videoFrame.width);
+          const x1 = canvas.width / (window.devicePixelRatio || 1) - (kp1.x * (canvas.width / videoFrame.width));
           const y1 = kp1.y * (canvas.height / videoFrame.height);
-          const x2 = kp2.x * (canvas.width / videoFrame.width);
+          const x2 = canvas.width / (window.devicePixelRatio || 1) - (kp2.x * (canvas.width / videoFrame.width));
           const y2 = kp2.y * (canvas.height / videoFrame.height);
           ctx.beginPath();
           ctx.moveTo(x1, y1);
@@ -168,7 +173,7 @@
 
       keypoints.forEach(kp => {
         if (kp.score > 0.3) {
-          const x = kp.x * (canvas.width / videoFrame.width);
+          const x = canvas.width / (window.devicePixelRatio || 1) - (kp.x * (canvas.width / videoFrame.width));
           const y = kp.y * (canvas.height / videoFrame.height);
           ctx.beginPath();
           ctx.arc(x, y, 4, 0, 2 * Math.PI);
