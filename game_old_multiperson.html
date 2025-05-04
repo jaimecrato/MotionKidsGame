@@ -2,83 +2,60 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>MoveNet Multi-Person Game</title>
+  <title>MoveNet Multipose Game</title>
   <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      overflow: hidden;
+    body {
       background: black;
-      height: 100%;
-      width: 100%;
-    }
-
-    canvas {
-      display: block;
-      width: 100vw;
-      height: 100vh;
-    }
-
-    #peerIdDisplay {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      background: rgba(0, 0, 0, 0.6);
       color: white;
       font-family: sans-serif;
-      font-size: 14px;
-      padding: 4px 8px;
-      border-radius: 6px;
-      z-index: 10;
+      text-align: center;
+    }
+    canvas {
+      border: 2px solid white;
     }
   </style>
-
-  <!-- PeerJS and TensorFlow / MoveNet -->
+  <!-- Load PeerJS -->
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <!-- Load TensorFlow and Pose Detection -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.12.0/dist/tf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection/dist/movenet.js"></script>
 </head>
 <body>
-  <span id="peerIdDisplay">Loading Peer ID...</span>
-  <canvas id="output"></canvas>
+  <h2>MoveNet Multi-Person Game</h2>
+  <p>Your Peer ID: <span id="peerIdDisplay">Loading...</span></p>
+  <canvas id="output" width="640" height="480"></canvas>
 
   <script>
     const canvas = document.getElementById('output');
     const ctx = canvas.getContext('2d');
-    const peerIdDisplay = document.getElementById('peerIdDisplay');
 
     let detector;
     let videoFrame = null;
-    let balloon = { x: 300, y: 200, radius: 40 };
+    let balloon = { x: 300, y: 200, radius: 30 };
     let score = 0;
 
-    // Resize canvas to fill the screen
-    function resizeCanvas() {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-    }
-
-    window.addEventListener('resize', resizeCanvas);
-    resizeCanvas();
-
-    // Load MoveNet Multipose
+    // Load MoveNet Multipose model
     async function loadModel() {
       detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
         modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
         enableTracking: true,
         trackerType: 'boundingBox'
       });
-      console.log("✅ MoveNet Multipose model loaded");
+      console.log("MoveNet Multipose loaded");
     }
 
     loadModel();
 
     // Initialize PeerJS
-    const peer = new Peer({ host: '0.peerjs.com', port: 443, secure: true });
+    const peer = new Peer({
+      host: '0.peerjs.com',
+      port: 443,
+      secure: true
+    });
 
     peer.on('open', id => {
-      peerIdDisplay.textContent = `Peer ID: ${id}`;
+      document.getElementById('peerIdDisplay').textContent = id;
     });
 
     peer.on('connection', conn => {
@@ -91,15 +68,12 @@
       });
     });
 
-    // Main detection and rendering
+    // Main detection + drawing
     async function detectAndDraw(image) {
-      if (!detector) return;
-
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
 
-      // Optional: show background
-      // ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-
+      if (!detector) return;
       const poses = await detector.estimatePoses(image);
 
       // Draw balloon
@@ -110,11 +84,14 @@
       ctx.strokeStyle = 'blue';
       ctx.stroke();
 
-      // Loop through detected people
+      // Loop through all detected people
       for (const person of poses) {
         const keypoints = person.keypoints;
+
+        // Draw skeleton
         drawSkeleton(keypoints);
 
+        // Detect hit using right wrist (keypoint index 10)
         const rightWrist = keypoints[10];
         if (rightWrist && rightWrist.score > 0.3) {
           const x = rightWrist.x * (canvas.width / image.width);
@@ -126,6 +103,7 @@
 
           if (distance < balloon.radius + 10) {
             score++;
+            // Move balloon
             balloon.x = Math.random() * (canvas.width - 60) + 30;
             balloon.y = Math.random() * (canvas.height - 60) + 30;
           }
@@ -135,36 +113,33 @@
       // Draw score
       ctx.fillStyle = 'white';
       ctx.font = '20px Arial';
-      ctx.fillText("Score: " + score, 20, 30);
+      ctx.fillText("Score: " + score, 10, 25);
     }
 
-    // Draw connected keypoints and joints
     function drawSkeleton(keypoints) {
-      const pairs = poseDetection.util.getAdjacentPairs(poseDetection.SupportedModels.MoveNet);
+      const adjacentPairs = poseDetection.util.getAdjacentPairs(poseDetection.SupportedModels.MoveNet);
       ctx.strokeStyle = 'white';
       ctx.lineWidth = 2;
 
-      pairs.forEach(([a, b]) => {
-        const kp1 = keypoints[a];
-        const kp2 = keypoints[b];
+      adjacentPairs.forEach(([i, j]) => {
+        const kp1 = keypoints[i];
+        const kp2 = keypoints[j];
+
         if (kp1.score > 0.3 && kp2.score > 0.3) {
-          const x1 = kp1.x * (canvas.width / videoFrame.width);
-          const y1 = kp1.y * (canvas.height / videoFrame.height);
-          const x2 = kp2.x * (canvas.width / videoFrame.width);
-          const y2 = kp2.y * (canvas.height / videoFrame.height);
           ctx.beginPath();
-          ctx.moveTo(x1, y1);
-          ctx.lineTo(x2, y2);
+          ctx.moveTo(kp1.x * (canvas.width / videoFrame.width), kp1.y * (canvas.height / videoFrame.height));
+          ctx.lineTo(kp2.x * (canvas.width / videoFrame.width), kp2.y * (canvas.height / videoFrame.height));
           ctx.stroke();
         }
       });
 
+      // Draw joints
       keypoints.forEach(kp => {
         if (kp.score > 0.3) {
           const x = kp.x * (canvas.width / videoFrame.width);
           const y = kp.y * (canvas.height / videoFrame.height);
           ctx.beginPath();
-          ctx.arc(x, y, 4, 0, 2 * Math.PI);
+          ctx.arc(x, y, 5, 0, 2 * Math.PI);
           ctx.fillStyle = 'red';
           ctx.fill();
         }
