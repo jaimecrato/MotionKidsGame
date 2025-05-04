@@ -1,9 +1,9 @@
-<!-- game.html with mirrored camera and skeleton -->
+<!-- game.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>MoveNet Fullscreen Pose Game</title>
+  <title>Pose Game - Visual Modes</title>
   <style>
     html, body {
       margin: 0;
@@ -20,16 +20,16 @@
       height: 100vh;
     }
 
-    #peerIdDisplay {
+    #ui {
       position: absolute;
       top: 10px;
       left: 10px;
-      background: rgba(0, 0, 0, 0.6);
+      background: rgba(0, 0, 0, 0.7);
       color: white;
       font-family: sans-serif;
       font-size: 14px;
-      padding: 4px 8px;
-      border-radius: 6px;
+      padding: 10px;
+      border-radius: 8px;
       z-index: 10;
     }
   </style>
@@ -41,18 +41,38 @@
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection/dist/movenet.js"></script>
 </head>
 <body>
-  <span id="peerIdDisplay">Loading Peer ID...</span>
+  <div id="ui">
+    <div>Peer ID: <span id="peerIdDisplay">Loading...</span></div>
+    <label>View Mode:
+      <select id="viewMode">
+        <option value="virtual">1. Virtual Scene + Skeleton</option>
+        <option value="camera">2. Camera Feed</option>
+        <option value="overlay">3. Camera + Cartoon Overlay</option>
+        <option value="cutout">4. Person Cut-Out (not implemented)</option>
+        <option value="skeleton">5. Skeleton Only</option>
+      </select>
+    </label>
+  </div>
   <canvas id="output"></canvas>
 
   <script>
     const canvas = document.getElementById('output');
     const ctx = canvas.getContext('2d');
     const peerIdDisplay = document.getElementById('peerIdDisplay');
+    const viewModeSelect = document.getElementById('viewMode');
 
     let detector;
     let videoFrame = null;
     let balloon = { x: 300, y: 200, radius: 40 };
     let score = 0;
+
+    let backgroundReady = false;
+    const backgroundImg = new Image();
+    backgroundImg.onload = () => { backgroundReady = true; };
+    backgroundImg.src = 'img/background_forest.png';
+
+    const overlayImg = new Image();
+    overlayImg.src = 'img/overlay_playful_scene.png';
 
     function resizeCanvas() {
       const dpr = window.devicePixelRatio || 1;
@@ -81,7 +101,7 @@
     const peer = new Peer({ host: '0.peerjs.com', port: 443, secure: true });
 
     peer.on('open', id => {
-      peerIdDisplay.textContent = `Peer ID: ${id}`;
+      peerIdDisplay.textContent = id;
     });
 
     peer.on('connection', conn => {
@@ -96,52 +116,62 @@
 
     async function detectAndDraw(image) {
       if (!detector) return;
+      const imgWidth = image.naturalWidth || image.width;
+      const imgHeight = image.naturalHeight || image.height;
+      if (!imgWidth || !imgHeight) return;
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      const imgWidth = image.naturalWidth || image.width;
-      const imgHeight = image.naturalHeight || image.height;
+      const mode = viewModeSelect.value;
+      const drawW = canvas.width / (window.devicePixelRatio || 1);
+      const drawH = canvas.height / (window.devicePixelRatio || 1);
 
-      if (imgWidth > 0 && imgHeight > 0) {
+      if (mode === 'camera' || mode === 'overlay') {
         ctx.save();
-        ctx.translate(canvas.width / (window.devicePixelRatio || 1), 0);
+        ctx.translate(drawW, 0);
         ctx.scale(-1, 1);
-        ctx.drawImage(
-          image,
-          0,
-          0,
-          canvas.width / (window.devicePixelRatio || 1),
-          canvas.height / (window.devicePixelRatio || 1)
-        );
+        ctx.drawImage(image, 0, 0, drawW, drawH);
         ctx.restore();
+      } else if (mode === 'virtual') {
+        if (backgroundReady) {
+          ctx.drawImage(backgroundImg, 0, 0, drawW, drawH);
+        } else {
+          ctx.fillStyle = 'black';
+          ctx.fillRect(0, 0, drawW, drawH);
+        }
+      }
+
+      if (mode === 'overlay') {
+        ctx.drawImage(overlayImg, 0, 0, drawW, drawH);
       }
 
       const poses = await detector.estimatePoses(image);
 
-      // Draw balloon (not mirrored)
-      ctx.beginPath();
-      ctx.arc(balloon.x, balloon.y, balloon.radius, 0, 2 * Math.PI);
-      ctx.fillStyle = 'skyblue';
-      ctx.fill();
-      ctx.strokeStyle = 'blue';
-      ctx.stroke();
+      if (mode !== 'cutout') {
+        ctx.beginPath();
+        ctx.arc(balloon.x, balloon.y, balloon.radius, 0, 2 * Math.PI);
+        ctx.fillStyle = 'skyblue';
+        ctx.fill();
+        ctx.strokeStyle = 'blue';
+        ctx.stroke();
+      }
 
       for (const person of poses) {
         const keypoints = person.keypoints;
-        drawSkeletonMirrored(keypoints);
+        drawSkeleton(keypoints);
 
         const wrist = keypoints[10];
-        if (wrist && wrist.score > 0.3) {
-          const mirroredX = canvas.width / (window.devicePixelRatio || 1) - (wrist.x * (canvas.width / image.width));
+        if (wrist && wrist.score > 0.3 && mode !== 'cutout') {
+          const x = wrist.x * (canvas.width / image.width);
           const y = wrist.y * (canvas.height / image.height);
-          const dx = mirroredX - balloon.x;
+          const dx = x - balloon.x;
           const dy = y - balloon.y;
           const distance = Math.sqrt(dx * dx + dy * dy);
 
           if (distance < balloon.radius + 10) {
             score++;
-            balloon.x = Math.random() * (canvas.width / (window.devicePixelRatio || 1) - 60) + 30;
-            balloon.y = Math.random() * (canvas.height / (window.devicePixelRatio || 1) - 60) + 30;
+            balloon.x = Math.random() * (drawW - 60) + 30;
+            balloon.y = Math.random() * (drawH - 60) + 30;
           }
         }
       }
@@ -151,37 +181,44 @@
       ctx.fillText("Score: " + score, 20, 30);
     }
 
-    function drawSkeletonMirrored(keypoints) {
-      const pairs = poseDetection.util.getAdjacentPairs(poseDetection.SupportedModels.MoveNet);
-      ctx.strokeStyle = 'white';
-      ctx.lineWidth = 2;
+    function drawSkeleton(keypoints) {
+  if (viewModeSelect.value === 'cutout') return;
 
-      pairs.forEach(([a, b]) => {
-        const kp1 = keypoints[a];
-        const kp2 = keypoints[b];
-        if (kp1.score > 0.3 && kp2.score > 0.3) {
-          const x1 = canvas.width / (window.devicePixelRatio || 1) - (kp1.x * (canvas.width / videoFrame.width));
-          const y1 = kp1.y * (canvas.height / videoFrame.height);
-          const x2 = canvas.width / (window.devicePixelRatio || 1) - (kp2.x * (canvas.width / videoFrame.width));
-          const y2 = kp2.y * (canvas.height / videoFrame.height);
-          ctx.beginPath();
-          ctx.moveTo(x1, y1);
-          ctx.lineTo(x2, y2);
-          ctx.stroke();
-        }
-      });
+  const isMirrored = ['camera', 'overlay', 'virtual', 'skeleton'].includes(viewModeSelect.value);
+  const drawW = canvas.width / (window.devicePixelRatio || 1);
+  const flipX = x => isMirrored ? drawW - (x * (canvas.width / videoFrame.width)) : x * (canvas.width / videoFrame.width);
+  const scaleY = y => y * (canvas.height / videoFrame.height);
 
-      keypoints.forEach(kp => {
-        if (kp.score > 0.3) {
-          const x = canvas.width / (window.devicePixelRatio || 1) - (kp.x * (canvas.width / videoFrame.width));
-          const y = kp.y * (canvas.height / videoFrame.height);
-          ctx.beginPath();
-          ctx.arc(x, y, 4, 0, 2 * Math.PI);
-          ctx.fillStyle = 'red';
-          ctx.fill();
-        }
-      });
+  const pairs = poseDetection.util.getAdjacentPairs(poseDetection.SupportedModels.MoveNet);
+  ctx.strokeStyle = 'white';
+  ctx.lineWidth = 2;
+
+  pairs.forEach(([a, b]) => {
+    const kp1 = keypoints[a];
+    const kp2 = keypoints[b];
+    if (kp1.score > 0.3 && kp2.score > 0.3) {
+      const x1 = flipX(kp1.x);
+      const y1 = scaleY(kp1.y);
+      const x2 = flipX(kp2.x);
+      const y2 = scaleY(kp2.y);
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
     }
-  </script>
+  });
+
+    keypoints.forEach(kp => {
+    if (kp.score > 0.3) {
+      const x = flipX(kp.x);
+      const y = scaleY(kp.y);
+      ctx.beginPath();
+      ctx.arc(x, y, 4, 0, 2 * Math.PI);
+      ctx.fillStyle = 'red';
+      ctx.fill();
+    }
+  });
+}
+</script>
 </body>
 </html>
