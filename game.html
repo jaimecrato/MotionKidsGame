@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Pose Game Receiver</title>
+  <title>MoveNet Multipose Game</title>
   <style>
     body {
       background: black;
@@ -14,12 +14,15 @@
       border: 2px solid white;
     }
   </style>
-  <!-- PeerJS and MediaPipe from CDN -->
+  <!-- Load PeerJS -->
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+  <!-- Load TensorFlow and Pose Detection -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.12.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection/dist/movenet.js"></script>
 </head>
 <body>
-  <h2>Pose Game Receiver</h2>
+  <h2>MoveNet Multi-Person Game</h2>
   <p>Your Peer ID: <span id="peerIdDisplay">Loading...</span></p>
   <canvas id="output" width="640" height="480"></canvas>
 
@@ -27,8 +30,22 @@
     const canvas = document.getElementById('output');
     const ctx = canvas.getContext('2d');
 
-    let balloon = { x: 200, y: 100, radius: 30 };
+    let detector;
+    let videoFrame = null;
+    let balloon = { x: 300, y: 200, radius: 30 };
     let score = 0;
+
+    // Load MoveNet Multipose model
+    async function loadModel() {
+      detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
+        modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
+        enableTracking: true,
+        trackerType: 'boundingBox'
+      });
+      console.log("MoveNet Multipose loaded");
+    }
+
+    loadModel();
 
     // Initialize PeerJS
     const peer = new Peer({
@@ -39,73 +56,25 @@
 
     peer.on('open', id => {
       document.getElementById('peerIdDisplay').textContent = id;
-      console.log("Your Peer ID:", id);
     });
 
     peer.on('connection', conn => {
-      console.log("Connected to camera");
-      conn.on('data', handleImageData);
+      conn.on('data', async imageData => {
+        videoFrame = new Image();
+        videoFrame.onload = async () => {
+          await detectAndDraw(videoFrame);
+        };
+        videoFrame.src = imageData;
+      });
     });
 
-    const pose = new Pose({
-      locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
-    });
-
-    pose.setOptions({
-      modelComplexity: 0,
-      smoothLandmarks: true,
-      enableSegmentation: false,
-      minDetectionConfidence: 0.3,
-      minTrackingConfidence: 0.3
-    });
-
-    pose.onResults(results => {
+    // Main detection + drawing
+    async function detectAndDraw(image) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
 
-      if (results.image) {
-        ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
-      }
-
-      // Draw pose landmarks
-      if (results.poseLandmarks) {
-        results.poseLandmarks.forEach((lm, i) => {
-          const x = lm.x * canvas.width;
-          const y = lm.y * canvas.height;
-
-          ctx.beginPath();
-          ctx.arc(x, y, 5, 0, 2 * Math.PI);
-          ctx.fillStyle = 'red';
-          ctx.fill();
-
-          ctx.fillStyle = 'white';
-          ctx.font = '10px Arial';
-          ctx.fillText(i, x + 6, y - 6);
-        });
-
-        // Check collision with right hand (landmark 16)
-        const rightHand = results.poseLandmarks[16];
-        if (rightHand) {
-          const handX = rightHand.x * canvas.width;
-          const handY = rightHand.y * canvas.height;
-
-          const dx = handX - balloon.x;
-          const dy = handY - balloon.y;
-          const distance = Math.sqrt(dx * dx + dy * dy);
-
-          if (distance < balloon.radius + 10) {
-            // Hit!
-            score++;
-            ctx.fillStyle = 'yellow';
-            ctx.beginPath();
-            ctx.arc(balloon.x, balloon.y, balloon.radius + 10, 0, 2 * Math.PI);
-            ctx.fill();
-
-            // Move balloon
-            balloon.x = Math.random() * (canvas.width - 60) + 30;
-            balloon.y = Math.random() * (canvas.height - 60) + 30;
-          }
-        }
-      }
+      if (!detector) return;
+      const poses = await detector.estimatePoses(image);
 
       // Draw balloon
       ctx.beginPath();
@@ -115,21 +84,66 @@
       ctx.strokeStyle = 'blue';
       ctx.stroke();
 
+      // Loop through all detected people
+      for (const person of poses) {
+        const keypoints = person.keypoints;
+
+        // Draw skeleton
+        drawSkeleton(keypoints);
+
+        // Detect hit using right wrist (keypoint index 10)
+        const rightWrist = keypoints[10];
+        if (rightWrist && rightWrist.score > 0.3) {
+          const x = rightWrist.x * (canvas.width / image.width);
+          const y = rightWrist.y * (canvas.height / image.height);
+
+          const dx = x - balloon.x;
+          const dy = y - balloon.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+
+          if (distance < balloon.radius + 10) {
+            score++;
+            // Move balloon
+            balloon.x = Math.random() * (canvas.width - 60) + 30;
+            balloon.y = Math.random() * (canvas.height - 60) + 30;
+          }
+        }
+      }
+
       // Draw score
       ctx.fillStyle = 'white';
       ctx.font = '20px Arial';
       ctx.fillText("Score: " + score, 10, 25);
-    });
+    }
 
-    // Handle image sent from smartphone
-    async function handleImageData(imageData) {
-      const img = new Image();
-      img.onload = async () => {
-        canvas.width = img.width;
-        canvas.height = img.height;
-        await pose.send({ image: img });
-      };
-      img.src = imageData;
+    function drawSkeleton(keypoints) {
+      const adjacentPairs = poseDetection.util.getAdjacentPairs(poseDetection.SupportedModels.MoveNet);
+      ctx.strokeStyle = 'white';
+      ctx.lineWidth = 2;
+
+      adjacentPairs.forEach(([i, j]) => {
+        const kp1 = keypoints[i];
+        const kp2 = keypoints[j];
+
+        if (kp1.score > 0.3 && kp2.score > 0.3) {
+          ctx.beginPath();
+          ctx.moveTo(kp1.x * (canvas.width / videoFrame.width), kp1.y * (canvas.height / videoFrame.height));
+          ctx.lineTo(kp2.x * (canvas.width / videoFrame.width), kp2.y * (canvas.height / videoFrame.height));
+          ctx.stroke();
+        }
+      });
+
+      // Draw joints
+      keypoints.forEach(kp => {
+        if (kp.score > 0.3) {
+          const x = kp.x * (canvas.width / videoFrame.width);
+          const y = kp.y * (canvas.height / videoFrame.height);
+          ctx.beginPath();
+          ctx.arc(x, y, 5, 0, 2 * Math.PI);
+          ctx.fillStyle = 'red';
+          ctx.fill();
+        }
+      });
     }
   </script>
 </body>
