@@ -39,8 +39,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.12.0/dist/tf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
   
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection/dist/movenet.js"></script>
-</head>
+  </head>
 <body>
   <div id="ui">
     <div>Peer ID: <span id="peerIdDisplay">Loading...</span></div>
@@ -124,7 +123,8 @@
     const imgHeight = image.naturalHeight || image.height;
     if (!imgWidth || !imgHeight) return;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Skip full canvas clear to reduce flicker
+    // ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     const mode = viewModeSelect.value;
     const drawW = canvas.width / (window.devicePixelRatio || 1);
@@ -137,20 +137,33 @@
       ctx.drawImage(image, 0, 0, drawW, drawH);
       ctx.restore();
     } else if (mode === 'cutout') {
-      const segmentation = await segmentationModel.segmentPerson(image);
-      const mask = bodyPix.toMask(segmentation);
-      const offscreen = document.createElement('canvas');
-      offscreen.width = canvas.width;
-      offscreen.height = canvas.height;
-      const offCtx = offscreen.getContext('2d');
-      offCtx.putImageData(mask, 0, 0);
+      const segmentation = await segmentationModel.segmentPerson(image, {
+        internalResolution: 'medium',
+        segmentationThreshold: 0.7
+      });
+
+      const maskImageData = bodyPix.toMask(segmentation, { r: 0, g: 0, b: 0, a: 0 }, { r: 0, g: 0, b: 0, a: 255 });
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = image.width;
+      tempCanvas.height = image.height;
+      const tempCtx = tempCanvas.getContext('2d');
+      tempCtx.putImageData(maskImageData, 0, 0);
+
       ctx.save();
       ctx.translate(drawW, 0);
       ctx.scale(-1, 1);
+
+      // Draw background first
       ctx.drawImage(backgroundImg, 0, 0, drawW, drawH);
-      ctx.globalCompositeOperation = 'source-in';
+
+      // Apply the mask from temp canvas
+      ctx.globalCompositeOperation = 'destination-in';
+      ctx.drawImage(tempCanvas, 0, 0, drawW, drawH);
+
+      // Draw person over masked area
+      ctx.globalCompositeOperation = 'destination-over';
       ctx.drawImage(image, 0, 0, drawW, drawH);
-      ctx.globalCompositeOperation = 'source-over';
+
       ctx.restore();
     } else if (mode === 'virtual') {
       if (backgroundReady) {
