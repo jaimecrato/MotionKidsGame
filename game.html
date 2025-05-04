@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>MoveNet Multi-Person Game</title>
+  <title>MoveNet Fullscreen Pose Game</title>
   <style>
     html, body {
       margin: 0;
@@ -53,17 +53,16 @@
     let balloon = { x: 300, y: 200, radius: 40 };
     let score = 0;
 
-    // Resize canvas to fill the screen
+    // Resize canvas to full browser window
     function resizeCanvas() {
       const dpr = window.devicePixelRatio || 1;
       canvas.width = window.innerWidth * dpr;
       canvas.height = window.innerHeight * dpr;
       canvas.style.width = window.innerWidth + 'px';
       canvas.style.height = window.innerHeight + 'px';
-      ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset any scaling
-      ctx.scale(dpr, dpr); // Apply scaling to match physical pixels
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.scale(dpr, dpr);
     }
-
 
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
@@ -101,11 +100,17 @@
     async function detectAndDraw(image) {
       if (!detector) return;
 
+      // Clear and draw camera image
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(
+        image,
+        0,
+        0,
+        canvas.width / (window.devicePixelRatio || 1),
+        canvas.height / (window.devicePixelRatio || 1)
+      );
 
-      // Optional: show background
-      // ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-
+      // Detect poses
       const poses = await detector.estimatePoses(image);
 
       // Draw balloon
@@ -116,24 +121,23 @@
       ctx.strokeStyle = 'blue';
       ctx.stroke();
 
-      // Loop through detected people
+      // Loop through all people
       for (const person of poses) {
         const keypoints = person.keypoints;
         drawSkeleton(keypoints);
 
-        const rightWrist = keypoints[10];
-        if (rightWrist && rightWrist.score > 0.3) {
-          const x = rightWrist.x * (canvas.width / image.width);
-          const y = rightWrist.y * (canvas.height / image.height);
-
+        // Detect right wrist collision (index 10)
+        const wrist = keypoints[10];
+        if (wrist && wrist.score > 0.3) {
+          const x = wrist.x * (canvas.width / image.width);
+          const y = wrist.y * (canvas.height / image.height);
           const dx = x - balloon.x;
           const dy = y - balloon.y;
           const distance = Math.sqrt(dx * dx + dy * dy);
-
           if (distance < balloon.radius + 10) {
             score++;
-            balloon.x = Math.random() * (canvas.width - 60) + 30;
-            balloon.y = Math.random() * (canvas.height - 60) + 30;
+            balloon.x = Math.random() * (canvas.width / (window.devicePixelRatio || 1) - 60) + 30;
+            balloon.y = Math.random() * (canvas.height / (window.devicePixelRatio || 1) - 60) + 30;
           }
         }
       }
@@ -144,7 +148,6 @@
       ctx.fillText("Score: " + score, 20, 30);
     }
 
-    // Draw connected keypoints and joints
     function drawSkeleton(keypoints) {
       const pairs = poseDetection.util.getAdjacentPairs(poseDetection.SupportedModels.MoveNet);
       ctx.strokeStyle = 'white';
