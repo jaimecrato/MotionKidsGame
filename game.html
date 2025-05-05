@@ -1,4 +1,3 @@
-<!-- game.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -13,13 +12,11 @@
       height: 100%;
       width: 100%;
     }
-
     canvas {
       display: block;
       width: 100vw;
       height: 100vh;
     }
-
     #ui {
       position: absolute;
       top: 10px;
@@ -33,13 +30,10 @@
       z-index: 10;
     }
   </style>
-
-  <!-- PeerJS and TensorFlow / MoveNet -->
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.12.0/dist/tf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
-  
-  </head>
+</head>
 <body>
   <div id="ui">
     <div>Peer ID: <span id="peerIdDisplay">Loading...</span></div>
@@ -52,206 +46,213 @@
         <option value="skeleton">5. Skeleton Only</option>
       </select>
     </label>
+    <div>Received FPS: <span id="recvFps">0</span></div>
+    <div>Rendered FPS: <span id="drawFps">0</span></div>
+    <div>Received Data: <span id="recvKBs">0</span> KB/s</div>
+    <div>Ping: <span id="pingValue">--</span> ms</div>
   </div>
   <canvas id="output"></canvas>
-
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/body-pix@2.0.5"></script>
-<script>
-  const canvas = document.getElementById('output');
-  const ctx = canvas.getContext('2d');
-  const peerIdDisplay = document.getElementById('peerIdDisplay');
-  const viewModeSelect = document.getElementById('viewMode');
+  <script>
+    const canvas = document.getElementById('output');
+    const ctx = canvas.getContext('2d');
+    const peerIdDisplay = document.getElementById('peerIdDisplay');
+    const viewModeSelect = document.getElementById('viewMode');
 
-  let detector;
-  let segmentationModel; // will be bodyPix
-  let videoFrame = null;
-  let balloon = { x: 300, y: 200, radius: 40 };
-  let score = 0;
+    let detector, segmentationModel, videoFrame = null;
+    let balloon = { x: 300, y: 200, radius: 40 };
+    let score = 0;
 
-  let backgroundReady = false;
-  const backgroundImg = new Image();
-  backgroundImg.onload = () => { backgroundReady = true; };
-  backgroundImg.src = 'img/background_forest.png';
+    let recvFrameCount = 0;
+    let drawFrameCount = 0;
+    let receivedBytesThisSecond = 0;
 
-  const overlayImg = new Image();
-  overlayImg.src = 'img/overlay_playful_scene.png';
+    let pingDisplay = document.getElementById('pingValue');
+    let lastPingTime = 0;
 
-  function resizeCanvas() {
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = window.innerWidth * dpr;
-    canvas.height = window.innerHeight * dpr;
-    canvas.style.width = window.innerWidth + 'px';
-    canvas.style.height = window.innerHeight + 'px';
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.scale(dpr, dpr);
-  }
+    setInterval(() => {
+      document.getElementById('recvFps').textContent = recvFrameCount;
+      document.getElementById('drawFps').textContent = drawFrameCount;
+      document.getElementById('recvKBs').textContent = Math.round(receivedBytesThisSecond / 1024);
+      recvFrameCount = 0;
+      drawFrameCount = 0;
+      receivedBytesThisSecond = 0;
+    }, 1000);
 
-  window.addEventListener('resize', resizeCanvas);
-  resizeCanvas();
+    const backgroundImg = new Image();
+    backgroundImg.src = 'img/background_forest.png';
+    backgroundImg.onload = () => backgroundReady = true;
+    let backgroundReady = false;
 
-  async function loadModel() {
-    detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
-      modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
-      enableTracking: true,
-      trackerType: 'boundingBox'
-    });
-    segmentationModel = await bodyPix.load();
-    console.log("✅ Models loaded");
-  }
+    const overlayImg = new Image();
+    overlayImg.src = 'img/overlay_playful_scene.png';
 
-  loadModel();
+    function resizeCanvas() {
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = window.innerWidth * dpr;
+      canvas.height = window.innerHeight * dpr;
+      canvas.style.width = window.innerWidth + 'px';
+      canvas.style.height = window.innerHeight + 'px';
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.scale(dpr, dpr);
+    }
 
-  const peer = new Peer({ host: '0.peerjs.com', port: 443, secure: true });
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
 
-  peer.on('open', id => {
-    peerIdDisplay.textContent = id;
-  });
-
-  peer.on('connection', conn => {
-    conn.on('data', async imageData => {
-      videoFrame = new Image();
-      videoFrame.onload = async () => {
-        await detectAndDraw(videoFrame);
-      };
-      videoFrame.src = imageData;
-    });
-  });
-
-  async function detectAndDraw(image) {
-    if (!detector || !segmentationModel) return;
-    const imgWidth = image.naturalWidth || image.width;
-    const imgHeight = image.naturalHeight || image.height;
-    if (!imgWidth || !imgHeight) return;
-
-    // Skip full canvas clear to reduce flicker
-    // ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    const mode = viewModeSelect.value;
-    const drawW = canvas.width / (window.devicePixelRatio || 1);
-    const drawH = canvas.height / (window.devicePixelRatio || 1);
-
-    if (mode === 'camera' || mode === 'overlay') {
-      ctx.save();
-      ctx.translate(drawW, 0);
-      ctx.scale(-1, 1);
-      ctx.drawImage(image, 0, 0, drawW, drawH);
-      ctx.restore();
-    } else if (mode === 'cutout') {
-      const segmentation = await segmentationModel.segmentPerson(image, {
-        internalResolution: 'medium',
-        segmentationThreshold: 0.7
+    async function loadModel() {
+      detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
+        modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
+        enableTracking: true,
+        trackerType: 'boundingBox'
       });
+      segmentationModel = await bodyPix.load();
+      console.log("✅ Models loaded");
+    }
 
-      const maskImageData = bodyPix.toMask(segmentation, { r: 0, g: 0, b: 0, a: 0 }, { r: 0, g: 0, b: 0, a: 255 });
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = image.width;
-      tempCanvas.height = image.height;
-      const tempCtx = tempCanvas.getContext('2d');
-      tempCtx.putImageData(maskImageData, 0, 0);
+    function handlePingMessages(conn) {
+      setInterval(() => {
+        if (conn?.open) {
+          lastPingTime = performance.now();
+          conn.send('__ping__');
+        }
+      }, 3000);
 
-      ctx.save();
-      ctx.translate(drawW, 0);
-      ctx.scale(-1, 1);
+      conn.on('data', msg => {
+        if (msg === '__pong__') {
+          const latency = Math.round(performance.now() - lastPingTime);
+          pingDisplay.textContent = latency;
+        }
+      });
+    }
 
-      // Draw background first
-      ctx.drawImage(backgroundImg, 0, 0, drawW, drawH);
+    loadModel();
 
-      // Apply the mask from temp canvas
-      ctx.globalCompositeOperation = 'destination-in';
-      ctx.drawImage(tempCanvas, 0, 0, drawW, drawH);
+    const peer = new Peer({ host: '0.peerjs.com', port: 443, secure: true });
+    peer.on('open', id => {
+      peerIdDisplay.textContent = id;
+    });
 
-      // Draw person over masked area
-      ctx.globalCompositeOperation = 'destination-over';
-      ctx.drawImage(image, 0, 0, drawW, drawH);
+    peer.on('connection', conn => {
+      handlePingMessages(conn);
+      conn.on('data', async imageData => {
+        if (imageData === '__ping__') {
+          conn.send('__pong__');
+          return;
+        }
+        if (typeof imageData === 'string' && imageData.startsWith('data:image')) {
+          receivedBytesThisSecond += imageData.length * 0.75;
+        }
+        recvFrameCount++;
+        videoFrame = new Image();
+        videoFrame.onload = async () => await detectAndDraw(videoFrame);
+        videoFrame.src = imageData;
+      });
+    });
 
-      ctx.restore();
-    } else if (mode === 'virtual') {
-      if (backgroundReady) {
+    async function detectAndDraw(image) {
+      drawFrameCount++;
+      if (!detector || !segmentationModel) return;
+
+      const drawW = canvas.width / (window.devicePixelRatio || 1);
+      const drawH = canvas.height / (window.devicePixelRatio || 1);
+      const mode = viewModeSelect.value;
+
+      if (mode === 'camera' || mode === 'overlay') {
+        ctx.save();
+        ctx.translate(drawW, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(image, 0, 0, drawW, drawH);
+        ctx.restore();
+      } else if (mode === 'cutout') {
+        const segmentation = await segmentationModel.segmentPerson(image);
+        const mask = bodyPix.toMask(segmentation);
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = image.width;
+        tempCanvas.height = image.height;
+        tempCanvas.getContext('2d').putImageData(mask, 0, 0);
+        ctx.save();
+        ctx.translate(drawW, 0);
+        ctx.scale(-1, 1);
         ctx.drawImage(backgroundImg, 0, 0, drawW, drawH);
-      } else {
-        ctx.fillStyle = 'black';
-        ctx.fillRect(0, 0, drawW, drawH);
-      }
-    }
-
-    if (mode === 'overlay') {
-      ctx.drawImage(overlayImg, 0, 0, drawW, drawH);
-    }
-
-    const poses = await detector.estimatePoses(image);
-
-    if (mode !== 'cutout') {
-      ctx.beginPath();
-      ctx.arc(balloon.x, balloon.y, balloon.radius, 0, 2 * Math.PI);
-      ctx.fillStyle = 'skyblue';
-      ctx.fill();
-      ctx.strokeStyle = 'blue';
-      ctx.stroke();
-    }
-
-    for (const person of poses) {
-      const keypoints = person.keypoints;
-      drawSkeleton(keypoints);
-
-      const wrist = keypoints[10];
-      if (wrist && wrist.score > 0.3 && mode !== 'cutout') {
-        const x = wrist.x * (canvas.width / image.width);
-        const y = wrist.y * (canvas.height / image.height);
-        const dx = x - balloon.x;
-        const dy = y - balloon.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-
-        if (distance < balloon.radius + 10) {
-          score++;
-          balloon.x = Math.random() * (drawW - 60) + 30;
-          balloon.y = Math.random() * (drawH - 60) + 30;
+        ctx.globalCompositeOperation = 'destination-in';
+        ctx.drawImage(tempCanvas, 0, 0, drawW, drawH);
+        ctx.globalCompositeOperation = 'destination-over';
+        ctx.drawImage(image, 0, 0, drawW, drawH);
+        ctx.restore();
+      } else if (mode === 'virtual') {
+        if (backgroundReady) ctx.drawImage(backgroundImg, 0, 0, drawW, drawH);
+        else {
+          ctx.fillStyle = 'black';
+          ctx.fillRect(0, 0, drawW, drawH);
         }
       }
-    }
 
-    ctx.fillStyle = 'white';
-    ctx.font = '20px Arial';
-    ctx.fillText("Score: " + score, 20, 30);
-  }
+      if (mode === 'overlay') {
+        ctx.drawImage(overlayImg, 0, 0, drawW, drawH);
+      }
 
-  function drawSkeleton(keypoints) {
-    if (viewModeSelect.value === 'cutout') return;
+      const poses = await detector.estimatePoses(image);
 
-    const isMirrored = ['camera', 'overlay', 'virtual', 'skeleton'].includes(viewModeSelect.value);
-    const drawW = canvas.width / (window.devicePixelRatio || 1);
-    const flipX = x => isMirrored ? drawW - (x * (canvas.width / videoFrame.width)) : x * (canvas.width / videoFrame.width);
-    const scaleY = y => y * (canvas.height / videoFrame.height);
-
-    const pairs = poseDetection.util.getAdjacentPairs(poseDetection.SupportedModels.MoveNet);
-    ctx.strokeStyle = 'white';
-    ctx.lineWidth = 2;
-
-    pairs.forEach(([a, b]) => {
-      const kp1 = keypoints[a];
-      const kp2 = keypoints[b];
-      if (kp1.score > 0.3 && kp2.score > 0.3) {
-        const x1 = flipX(kp1.x);
-        const y1 = scaleY(kp1.y);
-        const x2 = flipX(kp2.x);
-        const y2 = scaleY(kp2.y);
+      if (mode !== 'cutout') {
         ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
+        ctx.arc(balloon.x, balloon.y, balloon.radius, 0, 2 * Math.PI);
+        ctx.fillStyle = 'skyblue';
+        ctx.fill();
+        ctx.strokeStyle = 'blue';
         ctx.stroke();
       }
-    });
 
-    keypoints.forEach(kp => {
-      if (kp.score > 0.3) {
-        const x = flipX(kp.x);
-        const y = scaleY(kp.y);
-        ctx.beginPath();
-        ctx.arc(x, y, 4, 0, 2 * Math.PI);
-        ctx.fillStyle = 'red';
-        ctx.fill();
+      for (const person of poses) {
+        const wrist = person.keypoints[10];
+        drawSkeleton(person.keypoints);
+        if (wrist && wrist.score > 0.3 && mode !== 'cutout') {
+          const x = wrist.x * (canvas.width / image.width);
+          const y = wrist.y * (canvas.height / image.height);
+          const dx = x - balloon.x;
+          const dy = y - balloon.y;
+          if (Math.sqrt(dx * dx + dy * dy) < balloon.radius + 10) {
+            score++;
+            balloon.x = Math.random() * (drawW - 60) + 30;
+            balloon.y = Math.random() * (drawH - 60) + 30;
+          }
+        }
       }
-    });
-  }
-</script>
+
+      ctx.fillStyle = 'white';
+      ctx.font = '20px Arial';
+      ctx.textAlign = 'right';
+      ctx.fillText("Score: " + score, drawW - 20, 30);
+      ctx.textAlign = 'left';
+    }
+
+    function drawSkeleton(keypoints) {
+      const isMirrored = ['camera', 'overlay', 'virtual', 'skeleton'].includes(viewModeSelect.value);
+      const drawW = canvas.width / (window.devicePixelRatio || 1);
+      const flipX = x => isMirrored ? drawW - (x * (canvas.width / videoFrame.width)) : x * (canvas.width / videoFrame.width);
+      const scaleY = y => y * (canvas.height / videoFrame.height);
+      const pairs = poseDetection.util.getAdjacentPairs(poseDetection.SupportedModels.MoveNet);
+      ctx.strokeStyle = 'white';
+      ctx.lineWidth = 2;
+      pairs.forEach(([a, b]) => {
+        const kp1 = keypoints[a];
+        const kp2 = keypoints[b];
+        if (kp1.score > 0.3 && kp2.score > 0.3) {
+          ctx.beginPath();
+          ctx.moveTo(flipX(kp1.x), scaleY(kp1.y));
+          ctx.lineTo(flipX(kp2.x), scaleY(kp2.y));
+          ctx.stroke();
+        }
+      });
+      keypoints.forEach(kp => {
+        if (kp.score > 0.3) {
+          ctx.beginPath();
+          ctx.arc(flipX(kp.x), scaleY(kp.y), 4, 0, 2 * Math.PI);
+          ctx.fillStyle = 'red';
+          ctx.fill();
+        }
+      });
+    }
+  </script>
 </body>
 </html>

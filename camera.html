@@ -1,53 +1,172 @@
-<!-- camera.html -->
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+  <meta charset="UTF-8">
   <title>Camera Sender</title>
-  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <style>
+    body { margin: 0; background: #000; color: white; font-family: sans-serif; }
+    video { width: 100vw; height: auto; display: block; }
+    #ui {
+      z-index: 9999;
+      pointer-events: auto;
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(0,0,0,0.7);
+      padding: 10px;
+      border-radius: 10px;
+    }
+  </style>
 </head>
 <body>
-  <h2>Camera App</h2>
-  <video id="video" autoplay playsinline muted style="width: 100%; max-width: 400px;"></video>
-  <canvas id="canvas" style="display:none"></canvas>
-  <br>
-  <input id="peerIdInput" placeholder="Enter Game Peer ID" />
-  <button onclick="connect()">Connect</button>
+  <div id="ui">
+    <label>Game ID: <input type="text" id="targetId" placeholder="Enter Game ID"></label>
+    <button id="connectBtn">Connect</button><br><br>
 
+    <label>FPS:
+      <input type="range" min="5" max="60" value="30" id="fpsSlider">
+      <span id="fpsValue">30</span> fps
+    </label><br><br>
+
+    <label>Resolution:
+      <select id="resolutionSelect">
+        <option value="640x480">640×480</option>
+        <option value="1280x720">1280×720</option>
+        <option value="1920x1080">1920×1080</option>
+      </select>
+    </label><br><br>
+
+    <div>Actual FPS: <span id="actualFps">0</span></div>
+    <div>Sent FPS: <span id="sentFps">0</span></div>
+    <div>Upload: <span id="uploadRate">0</span> KB/s</div>
+    <div>Ping: <span id="pingValue">--</span> ms</div>
+  </div>
+
+  <video id="video" autoplay muted playsinline></video>
+
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <script>
     const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
-    let conn = null;
+    const targetId = document.getElementById('targetId');
+    const connectBtn = document.getElementById('connectBtn');
+    const fpsSlider = document.getElementById('fpsSlider');
+    const fpsValue = document.getElementById('fpsValue');
+    const actualFpsDisplay = document.getElementById('actualFps');
+    const sentFpsDisplay = document.getElementById('sentFps');
+    const uploadRateDisplay = document.getElementById('uploadRate');
+    const pingDisplay = document.getElementById('pingValue');
 
-    const peer = new Peer();
+    let lastFrameTime = performance.now();
+    let frameCount = 0;
+    let sentFrameCount = 0;
+    let bytesSentThisSecond = 0;
+    let lastPingTime = 0;
+
+    function updateActualFps() {
+      const now = performance.now();
+      frameCount++;
+      if (now - lastFrameTime >= 1000) {
+        actualFpsDisplay.textContent = frameCount;
+        frameCount = 0;
+        lastFrameTime = now;
+      }
+    }
+
+    setInterval(() => {
+      sentFpsDisplay.textContent = sentFrameCount;
+      uploadRateDisplay.textContent = Math.round(bytesSentThisSecond / 1024);
+      sentFrameCount = 0;
+      bytesSentThisSecond = 0;
+    }, 1000);
+
+    let peer = new Peer();
+    let conn = null;
+    let stream = null;
+    let currentFPS = parseInt(fpsSlider.value);
+
     peer.on('open', id => {
-      alert('Camera Peer ID: ' + id);
+      console.log("📷 Camera Peer ID:", id);
     });
 
-    async function startCamera() {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    async function startCamera(fps) {
+      const resolution = document.getElementById('resolutionSelect').value.split('x');
+      const width = parseInt(resolution[0]);
+      const height = parseInt(resolution[1]);
+
+      const constraints = {
+        video: {
+          facingMode: 'user',
+          width: { ideal: width },
+          height: { ideal: height },
+          frameRate: { ideal: fps, max: 60 }
+        },
+        audio: false
+      };
+
+      stream = await navigator.mediaDevices.getUserMedia(constraints);
       video.srcObject = stream;
     }
 
-    function connect() {
-      const targetId = document.getElementById('peerIdInput').value;
-      conn = peer.connect(targetId);
+    connectBtn.onclick = () => {
+      if (!targetId.value) return alert("Please enter the Game ID");
+      conn = peer.connect(targetId.value);
       conn.on('open', () => {
-        console.log('Connected to game');
-        setInterval(sendFrame, 200);
+        console.log("🔗 Connected to game");
+        sendFrames();
+        startPing();
       });
+
+      conn.on('data', msg => {
+        if (msg === '__pong__') {
+          const latency = Math.round(performance.now() - lastPingTime);
+          pingDisplay.textContent = latency;
+        }
+      });
+    };
+
+    function startPing() {
+      setInterval(() => {
+        if (conn?.open) {
+          lastPingTime = performance.now();
+          conn.send('__ping__');
+        }
+      }, 3000);
     }
 
-    function sendFrame() {
-      if (!video.videoWidth) return;
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0);
-      const imgData = canvas.toDataURL('image/jpeg', 0.6);
-      conn.send(imgData);
+    async function sendFrames() {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+
+      function draw() {
+        if (video.videoWidth === 0) return requestAnimationFrame(draw);
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+        if (conn?.open) {
+          conn.send(dataUrl);
+          sentFrameCount++;
+          bytesSentThisSecond += dataUrl.length * 0.75; // base64 → bytes
+        }
+
+        updateActualFps();
+        setTimeout(draw, 1000 / currentFPS);
+      }
+
+      draw();
     }
 
-    startCamera();
+    fpsSlider.addEventListener('input', () => {
+      currentFPS = parseInt(fpsSlider.value);
+      fpsValue.textContent = currentFPS;
+      const videoTrack = stream?.getVideoTracks?.()[0];
+      if (videoTrack) {
+        videoTrack.applyConstraints({ frameRate: currentFPS }).catch(console.warn);
+      }
+    });
+
+    startCamera(currentFPS);
   </script>
 </body>
 </html>
