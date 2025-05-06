@@ -23,7 +23,12 @@
     <label>Game ID: <input type="text" id="targetId" placeholder="Enter Game ID"></label>
     <button id="connectBtn">Connect</button><br><br>
 
-    <label>FPS:
+    
+    <label>
+      Use Public PeerJS:
+      <input type="checkbox" id="peerToggle">
+    </label><br><br>
+<label>FPS:
       <input type="range" min="5" max="60" value="30" id="fpsSlider">
       <span id="fpsValue">30</span> fps
     </label><br><br>
@@ -79,7 +84,20 @@
       bytesSentThisSecond = 0;
     }, 1000);
 
-    let peer = new Peer();
+    
+    const useLocalPeerServer = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+    
+    let peerToggleCheckbox = document.getElementById('peerToggle');
+    const usePublic = peerToggleCheckbox?.checked;
+
+    let peer = new Peer({
+      host: usePublic ? '0.peerjs.com' : 'localhost',
+      port: usePublic ? 443 : 9000,
+      path: '/',
+      secure: usePublic
+    });
+
+
     let conn = null;
     let stream = null;
     let currentFPS = parseInt(fpsSlider.value);
@@ -117,6 +135,7 @@
       });
 
       conn.on('data', msg => {
+    if (msg === '__ping__') { conn.send('__pong__'); return; }
         if (msg === '__pong__') {
           const latency = Math.round(performance.now() - lastPingTime);
           pingDisplay.textContent = latency;

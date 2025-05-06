@@ -37,7 +37,12 @@
 <body>
   <div id="ui">
     <div>Peer ID: <span id="peerIdDisplay">Loading...</span></div>
-    <label>View Mode:
+    
+    <label>
+      Use Public PeerJS:
+      <input type="checkbox" id="peerToggle">
+    </label><br><br>
+<label>View Mode:
       <select id="viewMode">
         <option value="virtual">1. Virtual Scene + Skeleton</option>
         <option value="camera">2. Camera Feed</option>
@@ -128,7 +133,20 @@
 
     loadModel();
 
-    const peer = new Peer({ host: '0.peerjs.com', port: 443, secure: true });
+    
+    const useLocalPeerServer = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+    
+    const peerToggleCheckbox = document.getElementById('peerToggle');
+    const usePublic = peerToggleCheckbox?.checked;
+
+    const peer = new Peer({
+      host: usePublic ? '0.peerjs.com' : 'localhost',
+      port: usePublic ? 443 : 9000,
+      path: '/',
+      secure: usePublic
+    });
+
+
     peer.on('open', id => {
       peerIdDisplay.textContent = id;
     });
