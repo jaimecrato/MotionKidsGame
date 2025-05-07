@@ -42,12 +42,14 @@
       Use Public PeerJS:
       <input type="checkbox" id="peerToggle">
     </label><br><br>
+
+    <label><input type="checkbox" id="drawSkeletons" checked> Show Skeleton</label><br><br>
 <label>View Mode:
       <select id="viewMode">
         <option value="virtual">1. Virtual Scene + Skeleton</option>
         <option value="camera">2. Camera Feed</option>
         <option value="overlay">3. Camera + Cartoon Overlay</option>
-        <option value="cutout">4. Person Cut-Out (not implemented)</option>
+        <option value="cutout">4. Person Cut-Out</option>
         <option value="skeleton">5. Skeleton Only</option>
       </select>
     </label>
@@ -222,8 +224,9 @@
       }
 
       for (const person of poses) {
-        const wrist = person.keypoints[10];
         drawSkeleton(person.keypoints);
+
+        const wrist = person.keypoints[10];
         if (wrist && wrist.score > 0.3 && mode !== 'cutout') {
           const x = wrist.x * (canvas.width / image.width);
           const y = wrist.y * (canvas.height / image.height);
@@ -237,6 +240,7 @@
         }
       }
 
+
       ctx.fillStyle = 'white';
       ctx.font = '20px Arial';
       ctx.textAlign = 'right';
@@ -245,7 +249,9 @@
     }
 
     function drawSkeleton(keypoints) {
-      const isMirrored = ['camera', 'overlay', 'virtual', 'skeleton'].includes(viewModeSelect.value);
+  const drawSkeletons = document.getElementById('drawSkeletons')?.checked;
+  if (!drawSkeletons) return;
+      const isMirrored = ['camera', 'overlay', 'virtual', 'skeleton', 'cutout'].includes(viewModeSelect.value);
       const drawW = canvas.width / (window.devicePixelRatio || 1);
       const flipX = x => isMirrored ? drawW - (x * (canvas.width / videoFrame.width)) : x * (canvas.width / videoFrame.width);
       const scaleY = y => y * (canvas.height / videoFrame.height);
