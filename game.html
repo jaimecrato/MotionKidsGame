@@ -171,82 +171,91 @@
     });
 
     async function detectAndDraw(image) {
-      drawFrameCount++;
-      if (!detector || !segmentationModel) return;
+  drawFrameCount++;
+  if (!detector || !segmentationModel) return;
 
-      const drawW = canvas.width / (window.devicePixelRatio || 1);
-      const drawH = canvas.height / (window.devicePixelRatio || 1);
-      const mode = viewModeSelect.value;
+  const drawW = canvas.width / (window.devicePixelRatio || 1);
+  const drawH = canvas.height / (window.devicePixelRatio || 1);
+  const mode = viewModeSelect.value;
 
-      if (mode === 'camera' || mode === 'overlay') {
-        ctx.save();
-        ctx.translate(drawW, 0);
-        ctx.scale(-1, 1);
-        ctx.drawImage(image, 0, 0, drawW, drawH);
-        ctx.restore();
-      } else if (mode === 'cutout') {
-        const segmentation = await segmentationModel.segmentPerson(image);
-        const mask = bodyPix.toMask(segmentation);
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = image.width;
-        tempCanvas.height = image.height;
-        tempCanvas.getContext('2d').putImageData(mask, 0, 0);
-        ctx.save();
-        ctx.translate(drawW, 0);
-        ctx.scale(-1, 1);
-        ctx.drawImage(backgroundImg, 0, 0, drawW, drawH);
-        ctx.globalCompositeOperation = 'destination-in';
-        ctx.drawImage(tempCanvas, 0, 0, drawW, drawH);
-        ctx.globalCompositeOperation = 'destination-over';
-        ctx.drawImage(image, 0, 0, drawW, drawH);
-        ctx.restore();
-      } else if (mode === 'virtual') {
-        if (backgroundReady) ctx.drawImage(backgroundImg, 0, 0, drawW, drawH);
-        else {
-          ctx.fillStyle = 'black';
-          ctx.fillRect(0, 0, drawW, drawH);
-        }
-      }
+  // Clear canvas every frame
+  ctx.clearRect(0, 0, drawW, drawH);
 
-      if (mode === 'overlay') {
-        ctx.drawImage(overlayImg, 0, 0, drawW, drawH);
-      }
+  // Fill black background only for skeleton mode
+  if (mode === 'skeleton') {
+    ctx.fillStyle = 'black';
+    ctx.fillRect(0, 0, drawW, drawH);
+  }
 
-      const poses = await detector.estimatePoses(image);
-
-      if (mode !== 'cutout') {
-        ctx.beginPath();
-        ctx.arc(balloon.x, balloon.y, balloon.radius, 0, 2 * Math.PI);
-        ctx.fillStyle = 'skyblue';
-        ctx.fill();
-        ctx.strokeStyle = 'blue';
-        ctx.stroke();
-      }
-
-      for (const person of poses) {
-        drawSkeleton(person.keypoints);
-
-        const wrist = person.keypoints[10];
-        if (wrist && wrist.score > 0.3 && mode !== 'cutout') {
-          const x = wrist.x * (canvas.width / image.width);
-          const y = wrist.y * (canvas.height / image.height);
-          const dx = x - balloon.x;
-          const dy = y - balloon.y;
-          if (Math.sqrt(dx * dx + dy * dy) < balloon.radius + 10) {
-            score++;
-            balloon.x = Math.random() * (drawW - 60) + 30;
-            balloon.y = Math.random() * (drawH - 60) + 30;
-          }
-        }
-      }
-
-
-      ctx.fillStyle = 'white';
-      ctx.font = '20px Arial';
-      ctx.textAlign = 'right';
-      ctx.fillText("Score: " + score, drawW - 20, 30);
-      ctx.textAlign = 'left';
+  if (mode === 'camera' || mode === 'overlay') {
+    ctx.save();
+    ctx.translate(drawW, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(image, 0, 0, drawW, drawH);
+    ctx.restore();
+  } else if (mode === 'cutout') {
+    const segmentation = await segmentationModel.segmentPerson(image);
+    const mask = bodyPix.toMask(segmentation);
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = image.width;
+    tempCanvas.height = image.height;
+    tempCanvas.getContext('2d').putImageData(mask, 0, 0);
+    ctx.save();
+    ctx.translate(drawW, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(backgroundImg, 0, 0, drawW, drawH);
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.drawImage(tempCanvas, 0, 0, drawW, drawH);
+    ctx.globalCompositeOperation = 'destination-over';
+    ctx.drawImage(image, 0, 0, drawW, drawH);
+    ctx.restore();
+  } else if (mode === 'virtual') {
+    if (backgroundReady) ctx.drawImage(backgroundImg, 0, 0, drawW, drawH);
+    else {
+      ctx.fillStyle = 'black';
+      ctx.fillRect(0, 0, drawW, drawH);
     }
+  }
+
+  if (mode === 'overlay') {
+    ctx.drawImage(overlayImg, 0, 0, drawW, drawH);
+  }
+
+  const poses = await detector.estimatePoses(image);
+
+  if (mode !== 'cutout') {
+    ctx.beginPath();
+    ctx.arc(balloon.x, balloon.y, balloon.radius, 0, 2 * Math.PI);
+    ctx.fillStyle = 'skyblue';
+    ctx.fill();
+    ctx.strokeStyle = 'blue';
+    ctx.stroke();
+  }
+
+  for (const person of poses) {
+    drawSkeleton(person.keypoints);
+
+    const wrist = person.keypoints[10];
+    if (wrist && wrist.score > 0.3 && mode !== 'cutout') {
+      const x = wrist.x * (canvas.width / image.width);
+      const y = wrist.y * (canvas.height / image.height);
+      const dx = x - balloon.x;
+      const dy = y - balloon.y;
+      if (Math.sqrt(dx * dx + dy * dy) < balloon.radius + 10) {
+        score++;
+        balloon.x = Math.random() * (drawW - 60) + 30;
+        balloon.y = Math.random() * (drawH - 60) + 30;
+      }
+    }
+  }
+
+  ctx.fillStyle = 'white';
+  ctx.font = '20px Arial';
+  ctx.textAlign = 'right';
+  ctx.fillText("Score: " + score, drawW - 20, 30);
+  ctx.textAlign = 'left';
+}
+
 
     function drawSkeleton(keypoints) {
   const drawSkeletons = document.getElementById('drawSkeletons')?.checked;
